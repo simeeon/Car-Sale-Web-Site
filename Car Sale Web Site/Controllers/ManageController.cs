@@ -7,17 +7,26 @@ using Microsoft.AspNet.Identity;
 using Microsoft.AspNet.Identity.Owin;
 using Microsoft.Owin.Security;
 using Car_Sale_Web_Site.Models;
+using System.Net;
+using Microsoft.AspNet.Identity.EntityFramework;
+using System.Data.Entity;
+using Car_Sale_Web_Site.Extensions;
+using System.Collections.Generic;
+using System.Web.Security;
 
 namespace Car_Sale_Web_Site.Controllers
 {
     [Authorize]
-    public class ManageController : Controller
+    public class ManageController : BaseController
     {
+        private ApplicationDbContext db = new ApplicationDbContext();
+
         private ApplicationSignInManager _signInManager;
         private ApplicationUserManager _userManager;
 
         public ManageController()
         {
+
         }
 
         public ManageController(ApplicationUserManager userManager, ApplicationSignInManager signInManager)
@@ -50,30 +59,131 @@ namespace Car_Sale_Web_Site.Controllers
             }
         }
 
-        //
-        // GET: /Manage/Index
+
+
+        [Authorize]
         public async Task<ActionResult> Index(ManageMessageId? message)
         {
-            ViewBag.StatusMessage =
-                message == ManageMessageId.ChangePasswordSuccess ? "Your password has been changed."
-                : message == ManageMessageId.SetPasswordSuccess ? "Your password has been set."
-                : message == ManageMessageId.SetTwoFactorSuccess ? "Your two-factor authentication provider has been set."
-                : message == ManageMessageId.Error ? "An error has occurred."
-                : message == ManageMessageId.AddPhoneSuccess ? "Your phone number was added."
-                : message == ManageMessageId.RemovePhoneSuccess ? "Your phone number was removed."
-                : "";
 
             var userId = User.Identity.GetUserId();
-            var model = new IndexViewModel
+
+            ApplicationUser user = db.Users.FirstOrDefault(x => x.Id == userId);
+
+            var a = TempData["GoBackTo"];
+            if (user == null)
             {
-                HasPassword = HasPassword(),
-                PhoneNumber = await UserManager.GetPhoneNumberAsync(userId),
-                TwoFactor = await UserManager.GetTwoFactorEnabledAsync(userId),
-                Logins = await UserManager.GetLoginsAsync(userId),
-                BrowserRemembered = await AuthenticationManager.TwoFactorBrowserRememberedAsync(userId)
-            };
-            return View(model);
+                return HttpNotFound();
+            }
+            
+            return View(user);
         }
+
+        [Authorize]
+        public async Task<ActionResult> Edit(string id)
+        {
+
+            var userId = User.Identity.GetUserId();
+
+            ApplicationUser user = db.Users.FirstOrDefault(x => x.Id == userId);
+
+            var a = TempData["GoBackTo"];
+            if (user == null)
+            {
+                return HttpNotFound();
+            }
+
+            return View(user);
+        }
+
+
+        [Authorize]
+        [HttpPost, ActionName("EditConfirmed")]
+        public ActionResult EditConfirmed(ApplicationUser user)
+        {
+            if (user.Id == null)
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+            }
+
+            var userToUpdateId = User.Identity.GetUserId();
+            user.Id = userToUpdateId;
+            var userToUpdate = db.Users.Where(u => u.Id == user.Id).ToList();
+
+            userToUpdate[0].FullName = user.FullName;
+            userToUpdate[0].UserName = user.UserName;
+            userToUpdate[0].Email = user.Email;
+            userToUpdate[0].PhoneNumber = user.PhoneNumber;
+
+            db.Entry(userToUpdate[0]).State = EntityState.Modified;
+            db.SaveChanges();
+            this.AddNotification("Success! The user is edited.", NotificationType.INFO);
+
+            return RedirectToAction("Index", "Manage");
+        }
+
+        [Authorize]
+        public ActionResult Delete(string id)
+        {
+            if (id == null)
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+            }
+
+            ApplicationUser user = db.Users.FirstOrDefault(x => x.Id == id);
+
+            if (user == null)
+            {
+                return HttpNotFound();
+            }
+            return View(user);
+        }
+
+        [Authorize]
+        public ActionResult Delete2(string id)
+        {
+            List<PostCar> userCars = db.PostCar.Where(car => car.AuthorId == id).ToList();
+            foreach (var item in userCars)
+            {
+                if (item.Files.Any(f => f.FileType == Car_Sale_Web_Site.Models.FileType.Photo))
+                {
+                    db.Files.RemoveRange(item.Files);
+                }
+                db.PostCar.Remove(item);
+            }
+
+            ApplicationUser user = db.Users.FirstOrDefault(x => x.Id == id);
+            Session.Abandon();
+            db.Users.Remove(user);
+            db.SaveChanges();
+
+            AuthenticationManager.SignOut(DefaultAuthenticationTypes.ApplicationCookie);
+            return RedirectToAction("Index", "Home");
+        }
+        //
+        // GET: /Manage/Index
+        //public async Task<ActionResult> Index(ManageMessageId? message)
+        //{
+
+        //    ViewBag.StatusMessage =
+        //        message == ManageMessageId.ChangePasswordSuccess ? "Your password has been changed."
+        //        : message == ManageMessageId.SetPasswordSuccess ? "Your password has been set."
+        //        : message == ManageMessageId.SetTwoFactorSuccess ? "Your two-factor authentication provider has been set."
+        //        : message == ManageMessageId.Error ? "An error has occurred."
+        //        : message == ManageMessageId.AddPhoneSuccess ? "Your phone number was added."
+        //        : message == ManageMessageId.RemovePhoneSuccess ? "Your phone number was removed."
+        //        : "";
+
+        //    var userId = User.Identity.GetUserId();
+        //    var model = new IndexViewModel
+        //    {
+        //        HasPassword = HasPassword(),
+        //        PhoneNumber = await UserManager.GetPhoneNumberAsync(userId),
+        //        TwoFactor = await UserManager.GetTwoFactorEnabledAsync(userId),
+        //        Logins = await UserManager.GetLoginsAsync(userId),
+        //        BrowserRemembered = await AuthenticationManager.TwoFactorBrowserRememberedAsync(userId)
+        //    };
+        //    return View(model);
+        //}
 
         //
         // POST: /Manage/RemoveLogin
@@ -81,6 +191,7 @@ namespace Car_Sale_Web_Site.Controllers
         [ValidateAntiForgeryToken]
         public async Task<ActionResult> RemoveLogin(string loginProvider, string providerKey)
         {
+
             ManageMessageId? message;
             var result = await UserManager.RemoveLoginAsync(User.Identity.GetUserId(), new UserLoginInfo(loginProvider, providerKey));
             if (result.Succeeded)
